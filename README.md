@@ -1,10 +1,10 @@
 # ferrocord
 
-Genel amaçlı, tip güvenli Rust mikro-çekirdeği tasarımıdır. Servis konteyneri, jenerik olay yolu ve eklenti yaşam döngüsünü kapsar.
+Genel amaçlı, tip güvenli Rust mikro-çekirdeğidir. Servis konteyneri, jenerik olay yolu ve eklenti yaşam döngüsünü kapsar.
 
 ## Proje durumu
 
-**Tasarım aşamasında; uygulama başlamadı.** GitHub deposu açıldı ve yerel çalışma alanına klonlandı. Rust kaynak kodu, `Cargo.toml`, çalıştırılabilir test ve CI yapılandırması henüz yoktur. `v0.1.0`, yayımlanmış sürüm değil, Faz 1 hedefidir.
+**Faz 1 uygulaması geliştiriliyor.** Bağımsız `ferrocord` crate'i için Rust kaynakları, Cargo manifesti, testler ve CI yapılandırması hazırlanıyor. `0.1.0` paket sürümüdür; yayımlanmış sürüm olduğu anlamına gelmez.
 
 31 Ekim 2026 ilerleme kaydında iki deponun da private olarak oluşturulduğu belirtilir. Public duruma geçiş ve yayımlama kullanıcı onayı gerektirir. Kaydın yerel hazırlıkla ilgili sonraki adımları tarihsel durumu anlatır; bu çalışma alanında ferrocord artık klonlanmıştır.
 
@@ -26,7 +26,7 @@ AI, LLM, prompt, terminal/PTY, ajan döngüleri, araç adaptörleri ve oturum ka
 
 ## Belgeler
 
-- [Mimari ve açık API kararları](docs/architecture.md)
+- [Mimari ve Faz 1 API sözleşmeleri](docs/architecture.md)
 - [Faz 1 yol haritası ve kabul ölçütleri](docs/roadmap.md)
 - [Açık kararlar, belirsizlikler ve kaynak sınırları](docs/open-questions.md)
 - [Yerel ajan çalışma rehberi](AGENTS.md)
@@ -37,4 +37,4 @@ Kaynak kopyalar iki projeyi birlikte anlatır; her madde ferrocord görevi deği
 
 ## Doğrulama durumu
 
-Henüz çalıştırılabilir build veya test yoktur. Manifest ve araç zinciri belirlendikten sonra biçim, Clippy ve birim test kontrolleri uygulanacaktır. Ayrıntılı test hedefleri ve yayımlama onayları yol haritasındadır.
+Yerel doğrulama sonuçları ayrıca raporlanmalıdır; CI yapılandırmasının varlığı GitHub Actions üzerinde başarıyla çalıştığını göstermez. Biçim, Clippy ve test komutları ile kabul ölçütleri [yol haritasındadır](docs/roadmap.md).

@@ -6,37 +6,37 @@
 
 [31 Ekim 2026 ilerleme kaydı](reference/progress-2026-10-31.md), GitHub depolarının private olarak açıldığını kaydeder. Kaydın sonraki adımlarında yerel hazırlık henüz beklemededir; mevcut çalışma alanında ise ferrocord klonlanmış ve `origin` adresi `https://github.com/FerroCord/ferrocord.git` olarak tanımlanmıştır.
 
-- **Tamamlandı:** GitHub deposunun açılması ve yerel klonun hazırlanması.
-- **Mevcut çalışma:** kapsam, mimari ve yapılacakların Türkçe dokümantasyonu.
-- **Başlamadı:** Rust uygulaması, manifest, birim testleri ve CI/yayımlama hattı.
+- **Tamamlandı:** GitHub deposunun açılması, yerel klon ve Faz 1 sözleşmelerinin seçimi.
+- **Mevcut çalışma:** Rust crate'i, davranış testleri ve onaylı CI yapılandırması eşzamanlı geliştiriliyor.
+- **Doğrulama sınırı:** Yerel kontrol sonuçları ayrıca raporlanmalıdır; GitHub Actions çalışması ve yayın yapılmış olduğu varsayılmamalıdır.
 
 ## Faz 1 görevleri ve kabul ölçütleri
 
-Aşağıdaki ölçütler uygulamanın doğrulanması için hedeflerdir; tamamlanmış test sonucu veya kaynakta bulunmayan kesin API kararı değildir.
+Aşağıdaki ölçütler onaylı sözleşmeye göre doğrulama hedefleridir; tek başlarına test veya CI sonucu değildir.
 
 | Görev | Kabul ölçütü | Doğrulama/test hedefi |
 | --- | --- | --- |
-| Açık sözleşmeleri netleştir | Context depolama seçimi, servis davranışları, olay kapasitesi/hataları ve Plugin yaşam döngüsü açıkça kararlaştırılmış; kesin imzalar belgelenmiş olmalı. | Kararlarla API ve test senaryolarının karşılaştırılması; belirsizliklerin varsayımla kapatılmaması. |
+| Sözleşmeleri belgele | Context depolaması, servis davranışları, olay kapasitesi/hataları ve Plugin yaşam döngüsü seçilmiş ve belgelenmiş olmalı. | API ve test senaryolarını [mimari sözleşmeyle](architecture.md) karşılaştır. |
 | Bağımsız crate iskeletini oluştur | `Cargo.toml`, `src/lib.rs`, `context.rs`, `event.rs`, `plugin.rs` hedef yapıya uymalı; ferrocore veya AI/LLM/PTY bağımlılığı bulunmamalı. | Manifest ve bağımlılık incelemesi; seçilen araç zinciriyle derleme. |
 | Context'i uygula | Tip tabanlı kayıt/erişim ve Arc paylaşımı çalışmalı; senkron kilit yalnızca kısa kritik bölümde tutulmalı. | Birden fazla servis tipi, aynı servise paylaşılan erişim, eşzamanlı okuma/yazma; karara bağlanan eksik ve yinelenen kayıt/hata senaryoları. |
 | EventBus'ı uygula | Her `E: 'static + Send + Sync + Clone` tipi ayrı Tokio broadcast kanalına sahip olmalı; sabit ajan olay enum'ı olmamalı. | Olay tipi izolasyonu, birden fazla aboneye yayın; kararlaştırılan lag, kapasite, alıcısız yayın ve kapanış senaryoları. |
 | Plugin sözleşmesini uygula | Onaylanmış yaşam döngüsü imzaları ve hata/kapanış davranışları uygulanmalı; ajan alanı çekirdeğe sızmamalı. | Genel amaçlı örnek test eklentisiyle kararlaştırılan sıra, başlangıç hatası, tekrar çağrı, iptal ve temizleme davranışları. |
 | API'yi testlerle dondur | Context, EventBus ve Plugin testleri kararlaştırılan sözleşmeleri kapsamalı; belgeler gerçek uygulamayla eşleşmeli. | Birim testleri, biçim/Clippy kontrolleri ve bağımsız diff incelemesi; başarısız veya doğrulanmamış kontrollerin raporlanması. |
-| CI ve sürüm hazırlığını onayla | CI kapsamı, araç zinciri, yetkiler ve yayımlama süreci kullanıcıyla onaylanmalı; yalnızca onaylanan yapı kurulmalı. | Onay sonrası gerçek CI çalışmasının ve yayın önkoşullarının kontrolü; yayın işlemi ayrıca açık onaya bağlı. |
+| CI | Push ve pull request üzerinde Ubuntu, stable Rust, rustfmt ve clippy ile biçim, Clippy ve test kontrolleri; yalnızca `contents: read` izni. | Gerçek GitHub Actions sonucunu ayrıca doğrula; yayın adımı yoktur. |
 
-## Uygulama öncesi karar listesi
+## Kalan kararlar
 
-Context, EventBus, Plugin, araç zinciri ve dağıtım sözleşmeleri [açık kararlar belgesinde](open-questions.md) izlenir. Ayrıntılar netleşmeden testlere varsayımsal politika gömülmemelidir. Kaynak iddialarının doğrulama durumu ve olası darboğazlar da aynı belgede yer alır.
+MSRV, yayın hazırlığı ve kaynak iddialarının doğrulama durumu [açık kararlar belgesinde](open-questions.md) izlenir. Seçilen Context, EventBus ve Plugin sözleşmeleri artık açık karar değildir.
 
-## Planlanan doğrulama
+## Doğrulama
 
-Manifest ve araç zinciri oluşturulduktan sonra gerçek yapıya göre şu kontroller değerlendirilir:
+Yerel kontroller:
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test`
 
-Bu komutlar mevcut depoda henüz çalıştırılabilir bir uygulamayı doğrulamış değildir. Eşzamanlı erişim testleriyle birlikte `.await` boyunca kilit/guard tutulmadığı kod incelemesinde kontrol edilmelidir. Yaşam döngüsü testleri kesin sözleşme belirlendikten sonra yazılmalıdır. Son değişiklik ayrı bir alt ajan tarafından incelenmeli; mümkün değilse bu sınır açıkça raporlanmalıdır.
+Context için kayıt, değiştirme, eksik servis ve eşzamanlı erişim; EventBus için tip izolasyonu, alıcı sayısı, lag, kapasite ve kapanış; Plugin için sıralama, rollback, hata toplama, geçersiz durum ve iptal senaryoları doğrulanmalıdır. Gerçek tüketici örneği servis, olay ve yaşam döngüsü kullanımını sınamalıdır. Son diff bağımsız incelenmeli; çalıştırılmayan veya engellenen kontroller açıkça raporlanmalıdır. Yerel kontroller GitHub Actions çalışmasının yerine geçmez.
 
 ## Faz 1 sonrası sınır
 
@@ -44,4 +44,4 @@ Kaynağın Faz 2–5 işleri ferrocore'a aittir: ortak driver, PTY/RLM MVP, recu
 
 ## Onay sınırları
 
-Bu dokümantasyon çalışması CI kodu eklemez ve sürüm yayımlamaz. CI kurulumu, crates.io veya GitHub yayını, public görünürlüğe geçiş, push, birleştirme, silme ve paylaşılan sistem değişiklikleri için kapsamı netleştirip kullanıcı onayı alınmalıdır. Depo açılmış olması, bu işlemler için otomatik yetki sayılmaz.
+Onaylı kapsam CI yapılandırmasını içerir; yayın veya dağıtım içermez. crates.io veya GitHub yayını, public görünürlüğe geçiş, push, birleştirme, silme ve paylaşılan sistem değişiklikleri ayrıca açık kullanıcı onayı gerektirir. Depo açılmış olması bu işlemler için otomatik yetki sayılmaz.

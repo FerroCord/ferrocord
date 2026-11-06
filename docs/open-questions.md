@@ -1,25 +1,21 @@
 # Açık kararlar, belirsizlikler ve kaynak sınırları
 
-Kaynak: [özgün ADR](reference/architecture-decisions-2026-10-31.md), özellikle ADR-001 ve ADR-006. Bu belge, ferrocord uygulamasından önce netleştirilecek sözleşmeleri toplar. Maddeler yeni mimari karar veya tamamlanmış uygulama anlamına gelmez. Faz 1 görevleri ve kabul ölçütleri [yol haritasında](roadmap.md), hedef tasarım [mimari belgesinde](architecture.md) yer alır.
+Kaynak: [özgün ADR](reference/architecture-decisions-2026-10-31.md), özellikle ADR-001 ve ADR-006. Onaylanan Faz 1 sözleşmeleri [mimari belgesinde](architecture.md), kabul ölçütleri [yol haritasında](roadmap.md) açıklanır. Aşağıdakiler kalan belirsizliklerdir; eşzamanlı uygulamanın veya doğrulamanın tamamlandığı anlamına gelmez.
 
-## Uygulama öncesi sözleşmeler
+## Kalan kararlar
 
-| Konu | Netleştirilecek ayrıntı | Aşama |
-| --- | --- | --- |
-| Context depolaması | Senkron RwLock/HashMap veya kaynakta alternatif olan DashMap seçimi; kilit zehirlenmesi ve hata politikası | Faz 1, Context öncesi |
-| Servis API'si | Kayıt/erişim imzaları ve tip sınırları; eksik servis, yinelenen kayıt, değiştirme/kaldırma ve tip dönüşümü davranışı | Faz 1, Context öncesi |
-| EventBus API'si | Yayın/abonelik imzaları; kanal kapasitesi, oluşturulması ve ömrü | Faz 1, EventBus öncesi |
-| Olay teslimi | Yavaş alıcı ve gecikme (`lag`), geri basınç (backpressure), alıcısız yayın, hata aktarımı ve kapanış politikası | Faz 1, EventBus öncesi |
-| Plugin sözleşmesi | Kesin trait imzaları, async ayrıntıları, Context aktarımı, nesne güvenliği ve trait sınırları | Faz 1, Plugin öncesi |
-| Yaşam döngüsü | Sıralama ve eklenti bağımlılıkları; başlangıç hatasında geri alma, tekrar çağrı, iptal ve kapanış temizliği | Faz 1, Plugin öncesi |
-| Araç zinciri | Rust sürümü ve asgari desteklenen Rust sürümü (MSRV), bağımlılık sürümleri ve özellik bayrakları | Faz 1, crate iskeleti öncesi |
-| Dağıtım | Sürümleme, lisans ve paket metaverisi; CI kapsamı, izinleri ve crates.io yayın gereksinimleri | Faz 1, CI ve sürüm hazırlığı |
+| Konu | Durum |
+| --- | --- |
+| MSRV | İlan edilmedi; yerelde gözlenen Rust 1.99.0 bir asgari sürüm garantisi değildir. |
+| Yayın ve lisans | Manifest için `MIT OR Apache-2.0` seçildi; lisans dosyaları ve yayımlama ayrıca yetki gerektirir. Paket ve marka uygunluğu doğrulanmadı. |
+| Gerçek CI çalışması | Onaylı CI kapsamı biçim, Clippy ve test kontrolleridir; GitHub Actions çalışmasının sonucu ayrıca doğrulanmalıdır. |
+| Sonraki entegrasyonlar | ferrocore entegrasyonunda doğabilecek API gereksinimleri ve olası değişiklikler ayrıca değerlendirilir. |
 
-Kaynakta `#[async_trait] pub trait Plugin` yönelimi bulunur; kesin metot imzaları tanımlanmamıştır. Lisans ve paket metaverisi gibi yayın ayrıntıları da kaynakta kesinleşmiş kabul edilmemelidir. API ve test politikaları ilgili kararlar netleştikten sonra oluşturulmalıdır.
+Context kayıt ve kilit politikası, EventBus kapasite ve teslim davranışı, Plugin imzaları ve yaşam döngüsü ile CI kapsamı Faz 1 için seçilmiştir; artık açık karar olarak izlenmez.
 
 ## Korunacak mimari sınırlar
 
-- Servis erişimi kısa süreli senkron kilit ve `Arc` paylaşımı kullanır. `.await` boyunca senkron kilit veya DashMap guard'ı tutulmaz.
+- Servis erişimi kısa süreli senkron `RwLock` ve `Arc` paylaşımı kullanır. `.await` boyunca senkron kilit tutulmaz.
 - Olay yolu her `E: 'static + Send + Sync + Clone` tipi için ayrı Tokio broadcast kanalı kullanır.
 - Çekirdek genel amaçlı Context, EventBus ve Plugin sorumluluklarını taşır. Ajan, LLM, prompt, PTY, alt ajan ve araç adaptörleri ferrocore kapsamındadır.
 - Bağımlılık yönü `ferrocore -> ferrocord` olarak korunur.
@@ -38,7 +34,7 @@ Aşağıdaki başlıklar tasarım riskleridir; performans ölçümü yapılmadı
 
 - Senkron kilit altında uzun işlem veya yoğun yazma, yürütücü iş parçacıklarını bloke edebilir.
 - `Arc` paylaşımı servis iç mantığının eşzamanlılık güvenliğini tek başına sağlamaz.
-- Kanal kapasitesi, abone hızı ve olayların klonlama maliyeti bellek ve teslim davranışını etkiler. Tokio broadcast davranışı değerlendirilmeden kayıpsız teslim veya sınırsız kuyruk garantisi verilemez.
-- Eklenti başlangıç/kapanış hataları ve belirsiz temizleme sahipliği kaynakların açık kalmasına yol açabilir.
+- Kanal kapasitesi, abone hızı ve olayların klonlama maliyeti bellek ve teslim davranışını etkiler. Broadcast kayıpsız teslim veya sınırsız kuyruk garantisi vermez.
+- Eklenti başlangıç/kapanış hataları veya iptal kaynakların açık kalmasına yol açabilir; çağıran yaşam döngüsü future'ını tamamlamalıdır.
 
-Kararlar, ilgili test hedefleriyle birlikte belgelenmelidir. CI kurulumu ve yayın kapsamı kullanıcıyla netleştirilir; yayınlama ve paylaşılan sistemleri etkileyen işlemler ayrıca onay gerektirir.
+Yayınlama ve paylaşılan sistemleri etkileyen işlemler ayrıca onay gerektirir.

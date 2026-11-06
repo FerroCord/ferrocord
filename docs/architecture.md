@@ -2,13 +2,13 @@
 
 ## Durum ve karar kaynağı
 
-Bu belge hedef tasarımı anlatır; uygulanmış veya test edilmiş API belgesi değildir. Depo açılmış ve klonlanmıştır; Rust uygulaması başlamamıştır.
+Bu belge, eşzamanlı geliştirilen Faz 1 uygulamasının onaylı sözleşmesini açıklar; test veya CI başarısı iddiası değildir.
 
 Kaynaklar: [tam mimari karar kaydı](reference/architecture-decisions-2026-10-31.md), özellikle ADR-001 ve ADR-006; [31 Ekim 2026 ilerleme kaydı](reference/progress-2026-10-31.md). Kaynaklardaki harici projelerle ilgili iddialar, nanosaniye erişim beklentisi dahil performans ifadeleri ve karşılaştırmalar bu depoda doğrulanmamıştır. Eksik görsel yer tutucuları kesin teknik sözleşme oluşturmaz.
 
 ## Sorumluluk ve bağımlılık sınırı
 
-ferrocord ayrı bir depo ve bağımsız Rust kütüphane crate'i olarak planlanır. Üç temel sorumluluğu vardır: servis konteyneri, tip güvenli olay yolu ve eklenti yaşam döngüsü.
+ferrocord ayrı bir depo ve bağımsız Rust kütüphane crate'idir. Üç temel sorumluluğu vardır: servis konteyneri, tip güvenli olay yolu ve eklenti yaşam döngüsü.
 
 Bağımlılık yönü **`ferrocore → ferrocord`** şeklindedir. ferrocord içinde AI, LLM, prompt veya terminal kavramları bulunmaz. ferrocore; AgentLoop, Tool ve Session modellerini, ortak TurnDriver'ı, LLM akışı/retry/bütçe/iptal yönetimini, PTY/sentinel yürütmesini, alt ajanları, JSONL geçmişini ve MCP/WASM adaptörlerini kendi katmanında tanımlar.
 
@@ -16,49 +16,42 @@ RLM ve ReAct kardeş döngüleri ile ileri ajan döngüleri ferrocore'a aittir; 
 
 ## Context: tip tabanlı servis konteyneri
 
-ADR-001'in temel tasarımı `std::sync::RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>` yapısıdır. **DashMap kaynakta alternatif olarak belirtilir; nihai seçim burada yapılmaz.**
+Depolama `std::sync::RwLock<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>` kullanır. `Context::new()` ve `Default` boş konteyner oluşturur. `T: Any + Send + Sync` için:
 
-- Servis anahtarı `TypeId` ile temsil edilir.
-- Servisler `Arc` üzerinden paylaşılır; `Any + Send + Sync` sınırları tip silme ve eşzamanlı erişim temelini oluşturur.
-- Okuma sırasında kısa süreli senkron kilit alınır, servis için `Arc::clone` yapılır ve kilit bırakılır. Servisle çalışma kilit dışında gerçekleşir.
-- `.await` boyunca senkron kilit tutulmaz. DashMap seçilirse aynı sınır guard'lar için de geçerlidir.
-- Kaynak bu kullanım için `tokio::sync::RwLock` yerine kısa süreli senkron erişimi seçer; bu, uzun süren işi kilit içinde yapma izni değildir.
+- `insert(&self, service: Arc<T>) -> Option<Arc<T>>` eski servisi atomik olarak değiştirir ve döndürür.
+- `try_insert(&self, service: Arc<T>) -> Result<(), DuplicateService>` mevcut servisi değiştirmeden yinelenen kayıt hatası verir.
+- `get<T>(&self) -> Option<Arc<T>>` paylaşılan servisi döndürür; eksik tip için `None` verir.
 
-Kesin kayıt/erişim metot adları ve imzaları tanımlı değildir. Eksik servis, yanlış tip dönüşümü, yinelenen kayıt, değiştirme/kaldırma ve kilit zehirlenmesi davranışları açık kararlardır.
+Kilit zehirlenmesinde `PoisonError::into_inner()` ile devam edilir; TypeId ile saklanan tipin uyuşmaması iç invariant ihlalidir ve panic oluşturur. Kilit altında yalnızca tablo erişimi ve Arc işlemleri yapılır; eski değerin yok edilmesi kilit dışında gerçekleşir. `.await` boyunca senkron kilit tutulmaz.
 
 ## EventBus: tip güvenli olay yolu
 
-Her olay tipi için ayrı bir **`tokio::sync::broadcast::Sender<E>`** kanalı planlanır. Olay sınırı **`E: 'static + Send + Sync + Clone`** şeklindedir. Kanallar tip tabanlı olarak ayrılır; ajan alanını bilen sabit bir `Event` enum'ı çekirdeğe konmaz.
+Her `E: 'static + Send + Sync + Clone` tipi için ayrı bir `tokio::sync::broadcast` kanalı kullanılır. `EventBus::new()` ve `Default` varsayılan 256 kapasitelidir; `with_capacity(NonZeroUsize) -> Result<Self, InvalidCapacity>` tüm tipler için kapasiteyi seçer ve `usize::MAX / 2` üzerindeki değerleri reddeder. Tokio tamponu sonraki ikinin kuvvetine yuvarlar: 3 için kapasite 4 olaydır. Bellek ayırma başarısızlığı süreç hatasına yol açabilir.
 
-Kaynakta `event.rs`, TypeId tabanlı jenerik Tokio broadcast olay yolu olarak tanımlanır. Yayınlama ve abonelik API'sinin kesin metot imzaları henüz belirtilmemiştir.
+`subscribe<E>(&self) -> broadcast::Receiver<E>` abone oluşturur; `publish<E>(&self, event: E) -> usize` gönderim anındaki alıcı sayısını döndürür. Abone yoksa sonuç 0'dır ve olay saklanmaz. Tip başına kanal ilk kullanımda tek kez oluşturulur; başlangıç alıcısı bırakılır. Sender'lar bus yaşadığı sürece tutulur; bus ve geçici sender klonları bırakılınca alıcılar kapanır.
 
-Kanal kapasitesi, yavaş alıcı/gecikme (`lag`) politikası, geri basınç (backpressure), alıcısız yayın, kapanış ve hata aktarımı açık kararlardır. Tokio broadcast davranışı değerlendirilmeden kayıpsız teslim, üreticiyi bekletme veya sınırsız kuyruk garantisi verilemez.
+Alıcı `recv` için Tokio'nun `Lagged(n)` ve `Closed` sonuçlarını doğrudan alır. Otomatik atlama, üreticiye geri basınç veya kayıpsız teslim garantisi yoktur. Tablo kilidi yayın dışında bırakılır; zehirlenme ve tip invariantı Context ile aynı politikayı izler.
 
 ## Plugin: genel amaçlı yaşam döngüsü
 
-Kaynak, `plugin.rs` içinde `#[async_trait] pub trait Plugin` yönelimini ve eklenti yaşam döngüsü sorumluluğunu belirtir. **Kesin trait imzaları bilinmiyor.** Başlatma/durdurma metotlarının adları, parametreleri, dönüş/hata tipleri, Context aktarımı, nesne güvenliği ve trait sınırları bu belgede icat edilmez.
+`Plugin: Send + Sync` nesne güvenli async trait'idir: `name(&self) -> &str`, `init(&self, context: &Context) -> Result<(), PluginError>` ve `shutdown(&self, context: &Context) -> Result<(), PluginError>`. `PluginError`, `Box<dyn std::error::Error + Send + Sync + 'static>` tipidir.
 
-Yaşam döngüsü sırası, eklentiler arası bağımlılık, başarısız başlangıçta geri alma, tekrar çağrı, iptal ve kapanış temizliği uygulama öncesinde netleştirilmelidir. Aşağıdaki yol haritası, testleri bu kararların sonucuna bağlar.
+`PluginManager::new()` ve `Default` yeni yönetici oluşturur. `add(&mut self, Box<dyn Plugin>)` yalnızca başlangıç durumunda çalışır; ad kayıt sırasında bir kez saklanır ve tam string eşitliğiyle benzersiz olmalıdır. `start` ve `shutdown` async metotları `&mut self` ve `&Context` alır. Başlangıç FIFO, kapanış LIFO sırasındadır. Başarısız init sonrasında yalnızca başarıyla başlatılmış eklentiler ters sırada kapatılır; özgün hata ve tüm rollback hataları korunur. Başarısız init kendi kısmi kaynak temizliğinden sorumludur. Normal kapanış bütün eklentileri dener ve tüm hataları çağrı sırasıyla toplar.
 
-## Hedef dosya ağacı
+`LifecycleError`, `InvalidState`, `DuplicateName(String)`, `InitFailed { plugin, source, rollback_errors }` ve `ShutdownFailed { errors }` varyantlarını sunar. Başarısız başlangıç veya tamamlanan kapanış sonrası yönetici sonlanır; yeniden başlatma yoktur. Başlatma veya kapanış future'ı tamamlanmadan bırakılırsa yönetici ara durumda kalır ve sonraki işlemler `InvalidState` verir. İptalde async temizleme garanti edilmez; çağıran future'ı tamamlanana kadar poll etmeli ve başlangıç ile kapanışta aynı Context örneğini kullanmalıdır.
 
-Aşağıdaki yollar ADR'deki hedeflerdir; henüz oluşturulmuş uygulama dosyaları değildir:
+## Paket ve CI
 
-- `Cargo.toml`: bağımsız `[package]`, paket adı `ferrocord`.
-- `src/lib.rs`: kütüphane giriş noktası.
-- `src/context.rs`: senkron servis konteyneri ve Arc paylaşımı.
-- `src/event.rs`: tip tabanlı Tokio broadcast olay yolu.
-- `src/plugin.rs`: Plugin yaşam döngüsü sözleşmesi.
-- `.github/workflows/ci.yml`: bağımsız hızlı CI ve crates.io yayımlama hattı hedefi; kurulum ve yayımlama kapsamı kullanıcı onayıyla netleştirilir.
+Paket Rust 2021 edition ve `MIT OR Apache-2.0` lisans ifadesini kullanır; MSRV ilan edilmez. Çalışma zamanı bağımlılıkları `async-trait` ve `sync` özellikli Tokio'dur. Testlerde Tokio'nun `macros`, `rt-multi-thread`, `sync` ve `time` özellikleri kullanılır. Lisans ifadesi lisans dosyaları veya yayımlama yetkisi anlamına gelmez.
 
-Rust sürümü/MSRV, bağımlılık sürümleri, özellik bayrakları ve yayımlama ayarları kaynakta kesinleştirilmemiştir. Bu belge manifest veya CI kodu eklemez.
+Onaylı CI, push ve pull request için Ubuntu üzerinde stable Rust, rustfmt ve clippy ile biçim, Clippy ve test kontrollerini çalıştırır; yalnızca `contents: read` izni kullanır. Yayın veya dağıtım adımı yoktur. Yapılandırma, gerçek GitHub Actions çalışmasının başarılı olduğuna kanıt değildir.
 
 ## Açık kararlar ve kaynak sınırları
 
-Uygulama öncesi sözleşmeler, kaynak iddialarının doğrulama durumu ve eksik görsellerin kapsamı [açık kararlar belgesinde](open-questions.md) izlenir. Context, EventBus ve Plugin API ayrıntıları ilgili kararlar netleştikten sonra kesinleştirilecektir.
+Kalan kararlar, kaynak iddialarının doğrulama durumu ve eksik görsellerin kapsamı [açık kararlar belgesinde](open-questions.md) izlenir.
 
 ## Kaynak ve eşzamanlılık sınırları
 
-Senkron kilit altında uzun işlem veya yoğun yazma, yürütücü iş parçacıklarını bloke edebilir. `Arc` paylaşımı servis iç mantığının doğruluğunu kendiliğinden sağlamaz. Olay kanalı kapasitesi ve abonelerin hızı bellek ve teslim davranışını etkiler; `Clone` maliyeti olay yüküne bağlıdır. Eklenti başlangıç/kapanış hataları kaynakların açık kalmasına yol açabilir. Bunlar ölçülmüş sorunlar değil, karar ve test aşamasında ele alınacak risklerdir.
+Senkron kilit altında uzun işlem veya yoğun yazma, yürütücü iş parçacıklarını bloke edebilir. `Arc` paylaşımı servis iç mantığının doğruluğunu kendiliğinden sağlamaz. Olay kanalı kapasitesi ve abonelerin hızı bellek ve teslim davranışını etkiler; `Clone` maliyeti olay yüküne bağlıdır. Eklenti hataları veya iptal kaynakların açık kalmasına yol açabilir. Bunlar ölçülmüş sorunlar değil, tasarım riskleridir.
 
 Uygulama adımları, kabul ölçütleri ve doğrulama hedefleri için [yol haritasına](roadmap.md) bakın.
